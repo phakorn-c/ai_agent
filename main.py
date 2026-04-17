@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 from prompts import system_prompt
 from call_function import available_functions
+from functions.call_function import call_function
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -22,30 +23,55 @@ args = parser.parse_args()
 
 def main():
     messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
+    prompt_tokens = 0
+    response_tokens = 0
 
-    response = client.models.generate_content(
-        model="gemma-4-31b-it",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions],
-            system_instruction=system_prompt,
-            temperature=0,
+    while True:
+        response = client.models.generate_content(
+            model="gemma-4-31b-it",
+            contents=messages,
+            config=types.GenerateContentConfig(
+                tools=[available_functions],
+                system_instruction=system_prompt,
+                temperature=0,
+            ),
         )
-    )
 
-    if response.usage_metadata is None:
-        raise RuntimeError("API request failed: usage_metadata is None")
+        if response.usage_metadata is None:
+            raise RuntimeError("API request failed: usage_metadata is None")
 
-    if args.verbose:
-        print(f"User prompt: {args.user_prompt}")
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+        prompt_tokens += response.usage_metadata.prompt_token_count or 0
+        response_tokens += response.usage_metadata.candidates_token_count or 0
 
-    if response.function_calls:
+        if response.candidates:
+            candidate = response.candidates[0]
+            if candidate.content:
+                messages.append(candidate.content)
+
+        if not response.function_calls:
+            if args.verbose:
+                print(f"User prompt: {args.user_prompt}")
+                print(f"Prompt tokens: {prompt_tokens}")
+                print(f"Response tokens: {response_tokens}")
+            print(response.text)
+            break
+
         for function_call in response.function_calls:
-            print(f"Calling function: {function_call.name}({function_call.args})")
-    else:
-        print(response.text)
+            function_call_result = call_function(function_call, verbose=args.verbose)
+
+            if not function_call_result.parts:
+                raise RuntimeError("Function call result has no parts")
+
+            if function_call_result.parts[0].function_response is None:
+                raise RuntimeError("Function call result part has no function_response")
+
+            if function_call_result.parts[0].function_response.response is None:
+                raise RuntimeError("Function call response has no response field")
+
+            messages.append(function_call_result)
+
+            if args.verbose:
+                print(f"-> {function_call_result.parts[0].function_response.response}")
 
 
 if __name__ == "__main__":

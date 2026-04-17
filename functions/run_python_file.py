@@ -24,17 +24,20 @@ schema_run_python_file = types.FunctionDeclaration(
 
 
 def run_python_file(working_directory, file_path, args=None):
-    if not file_path.startswith(working_directory):
+    working_dir_abs = os.path.abspath(working_directory)
+    target_file = os.path.normpath(os.path.join(working_dir_abs, file_path))
+
+    if os.path.commonpath([working_dir_abs, target_file]) != working_dir_abs:
         return f'Cannot execute "{file_path}" as it is outside'
 
-    if not os.path.isfile(file_path):
+    if not os.path.isfile(target_file):
         return f'"{os.path.basename(file_path)}" does not exist'
 
-    if not file_path.endswith(".py"):
+    if not target_file.endswith(".py"):
         return f'"{os.path.basename(file_path)}" is not a Python file'
 
     try:
-        command = ["python", file_path]
+        command = ["python", target_file]
         if args:
             command.extend(args)
 
